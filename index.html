@@ -58,14 +58,25 @@
             Wallet: () => <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4"/><path d="M4 6v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9.42a2 2 0 0 0-1.5-1.92L4.5 6"/><path d="M15 13h2"/><path d="M15 17h2"/></svg>
         };
 
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'q-nota-app';
-        
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
+        // --- ENVIRONMENT DETECTION & INIT ---
+        let isLocalMode = false;
+        let auth, db;
+        let appId = 'q-nota-local';
+
+        try {
+            // Cek apakah config Firebase tersedia (hanya di Canvas environment)
+            const firebaseConfig = JSON.parse(__firebase_config);
+            appId = typeof __app_id !== 'undefined' ? __app_id : 'q-nota-app';
+            
+            if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            auth = firebase.auth();
+            db = firebase.firestore();
+        } catch (e) {
+            console.warn("Firebase Config not found. Switching to Local Mode (LocalStorage).");
+            isLocalMode = true;
         }
-        const auth = firebase.auth();
-        const db = firebase.firestore();
 
         const initialItems = [
             "Ayam Gede (Mentah)", "Ayam Jumbo (Mentah)", "Lele Segar", "Nila Segar", "Gurame Segar",
@@ -121,7 +132,7 @@
             const commonUnits = ['Kg', 'Pcs', 'Gram', 'Liter', 'Ikat', 'Bungkus', 'Pack', 'Box', 'Butir', 'Biji', 'Lusin'];
 
             const paths = useMemo(() => {
-                if (!user) return null;
+                if (isLocalMode || !user) return null;
                 return {
                     history: `artifacts/${appId}/users/${user.uid}/history`,
                     master: `artifacts/${appId}/users/${user.uid}/master/data`,
@@ -138,6 +149,12 @@
 
             useEffect(() => {
                 const login = async () => {
+                    if (isLocalMode) {
+                        // Mode Lokal: Set dummy user
+                        setUser({ uid: 'local_user', displayName: 'Guest' });
+                        return;
+                    }
+
                     try {
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                             await auth.signInWithCustomToken(__initial_auth_token);
@@ -147,10 +164,24 @@
                     } catch (e) { console.error(e); }
                 };
                 login();
-                return auth.onAuthStateChanged(setUser);
+                if (!isLocalMode) {
+                    return auth.onAuthStateChanged(setUser);
+                }
             }, []);
 
             useEffect(() => {
+                if (isLocalMode) {
+                    // Load data dari LocalStorage
+                    const localCart = JSON.parse(localStorage.getItem('q-nota-cart') || '[]');
+                    const localHistory = JSON.parse(localStorage.getItem('q-nota-history') || '[]');
+                    const localMaster = JSON.parse(localStorage.getItem('q-nota-master') || JSON.stringify(initialItems));
+                    
+                    setCart(localCart);
+                    setHistory(localHistory.sort((a, b) => b.timestamp - a.timestamp));
+                    setItemsDB(localMaster);
+                    return;
+                }
+
                 if (!user || !paths) return;
 
                 const unsubHistory = db.collection(paths.history).onSnapshot(snap => {
@@ -170,11 +201,19 @@
             }, [user, paths]);
 
             const syncCart = async (newCart) => {
+                if (isLocalMode) {
+                    localStorage.setItem('q-nota-cart', JSON.stringify(newCart));
+                    return;
+                }
                 if (!user || !paths) return;
                 try { await db.doc(paths.cart).set({ items: newCart }); } catch (e) { console.error(e); }
             };
 
             const syncMaster = async (newItems) => {
+                if (isLocalMode) {
+                    localStorage.setItem('q-nota-master', JSON.stringify(newItems));
+                    return;
+                }
                 if (!user || !paths) return;
                 try { await db.doc(paths.master).set({ items: newItems }); } catch (e) { console.error(e); }
             };
@@ -230,35 +269,47 @@
             };
 
             const handleSaveNote = async () => {
-                if (cart.length === 0 || !user || !paths) return;
+                if (cart.length === 0) return;
                 setIsSaving(true);
                 showStatus('Menyimpan Nota...', 'loading');
+                
                 try {
-                    let ref;
-                    let message = '';
-                    
-                    if (currentNoteId) {
-                        ref = db.collection(paths.history).doc(currentNoteId);
-                        message = 'Arsip Diperbarui!';
-                    } else {
-                        ref = db.collection(paths.history).doc();
-                        message = 'Nota Tersimpan!';
-                    }
-                    
-                    await ref.set({
-                        id: ref.id,
+                    const noteData = {
+                        id: currentNoteId || (isLocalMode ? 'local-' + Date.now() : db.collection(paths.history).doc().id),
                         date: transactionDate,
                         items: cart,
                         total: cart.reduce((acc, curr) => acc + curr.total, 0),
                         timestamp: Date.now()
-                    });
+                    };
+
+                    if (isLocalMode) {
+                        // Local Mode Save
+                        let localHistory = JSON.parse(localStorage.getItem('q-nota-history') || '[]');
+                        if (currentNoteId) {
+                            localHistory = localHistory.map(h => h.id === currentNoteId ? noteData : h);
+                        } else {
+                            localHistory.push(noteData);
+                        }
+                        localStorage.setItem('q-nota-history', JSON.stringify(localHistory));
+                        setHistory(localHistory.sort((a, b) => b.timestamp - a.timestamp));
+                    } else {
+                        // Firebase Save
+                        if (currentNoteId) {
+                            await db.collection(paths.history).doc(currentNoteId).set(noteData);
+                        } else {
+                            const ref = db.collection(paths.history).doc();
+                            noteData.id = ref.id;
+                            await ref.set(noteData);
+                        }
+                    }
                     
                     setCart([]);
                     setCurrentNoteId(null);
                     await syncCart([]);
                     setIsSaving(false);
-                    showStatus(message);
+                    showStatus(currentNoteId ? 'Arsip Diperbarui!' : 'Nota Tersimpan!');
                 } catch (e) {
+                    console.error(e);
                     setIsSaving(false);
                     showStatus('Gagal Simpan', 'error');
                 }
@@ -279,9 +330,7 @@
                 try {
                     setCart([]);
                     setCurrentNoteId(null);
-                    if (user && paths) {
-                        await db.doc(paths.cart).set({ items: [] });
-                    }
+                    await syncCart([]);
                     resetForm();
                     showStatus('Rencana Direset!');
                 } catch (e) {
@@ -293,18 +342,25 @@
                 setConfirmModal({
                     show: true,
                     title: 'Hapus Arsip?',
-                    message: 'Arsip ini akan dihapus permanen dari Cloud. Anda yakin?',
+                    message: 'Arsip ini akan dihapus permanen. Anda yakin?',
                     onConfirm: () => processDeleteHistory(noteId)
                 });
             };
 
             const processDeleteHistory = async (noteId) => {
                 setConfirmModal({ ...confirmModal, show: false });
-                if (!user || !paths || !noteId) return;
-                
                 showStatus('Menghapus...', 'loading');
                 try {
-                    await db.collection(paths.history).doc(noteId).delete();
+                    if (isLocalMode) {
+                        const localHistory = JSON.parse(localStorage.getItem('q-nota-history') || '[]');
+                        const updatedHistory = localHistory.filter(h => h.id !== noteId);
+                        localStorage.setItem('q-nota-history', JSON.stringify(updatedHistory));
+                        setHistory(updatedHistory.sort((a, b) => b.timestamp - a.timestamp));
+                    } else {
+                        if (user && paths) {
+                            await db.collection(paths.history).doc(noteId).delete();
+                        }
+                    }
                     showStatus('Arsip Dihapus!');
                 } catch (e) {
                     console.error(e);
@@ -414,7 +470,9 @@
                                 <h1 className="text-4xl font-black tracking-tighter italic leading-none">Q-Nota</h1>
                                 <p className="text-[9px] uppercase font-bold opacity-75 flex items-center gap-1.5 mt-2 tracking-[0.2em]">
                                     <span className={`w-2 h-2 rounded-full ${user ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`}></span>
-                                    {user ? 'Cloud Sync Aktif' : 'Menghubungkan...'}
+                                    {isLocalMode 
+                                        ? 'Mode Offline (Penyimpanan Lokal)' 
+                                        : (user ? 'Cloud Sync Aktif' : 'Menghubungkan...')}
                                 </p>
                             </div>
                             <div className="bg-white/10 p-4 rounded-[1.8rem] backdrop-blur-md border border-white/20 shadow-inner w-14 h-14 text-white">
