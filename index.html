@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Q-Nota - Qian's Smart Shopping</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Firebase SDKs (Compat Version) -->
+    <script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore-compat.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        /* FIX: Hapus display:none pada calendar-picker-indicator agar ikon kalender muncul */
+        input[type="date"]::-webkit-inner-spin-button { display: none; -webkit-appearance: none; }
+        
+        /* Pastikan input date mudah diklik */
+        input[type="date"] { position: relative; }
+        
+        .tab-transition { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .modal-enter { animation: modalIn 0.2s ease-out forwards; }
+        @keyframes modalIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-status { animation: fadeIn 0.3s ease-out forwards; }
+    </style>
+</head>
+<body class="bg-slate-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // --- ICONS (SVG Hardcoded) ---
+        const Icons = {
+            Trash: () => <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>,
+            Edit: () => <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>,
+            ShopBag: () => <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>,
+            Archive: () => <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>,
+            Database: () => <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>,
+            X: () => <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>,
+            Check: () => <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>,
+            Alert: () => <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>,
+            Plan: () => <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" x2="21" y1="9" y2="9"/><path d="m9 16 2 2 4-4"/></svg>,
+            Warn: () => <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>,
+            Wallet: () => <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4"/><path d="M4 6v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9.42a2 2 0 0 0-1.5-1.92L4.5 6"/><path d="M15 13h2"/><path d="M15 17h2"/></svg>
+        };
+
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'q-nota-app';
+        
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        const initialItems = [
+            "Ayam Gede (Mentah)", "Ayam Jumbo (Mentah)", "Lele Segar", "Nila Segar", "Gurame Segar",
+            "Fillet Ayam", "Fillet Lele", "Fillet Gurame", "Tahu Putih (Mentah)", "Tempe (Mentah)",
+            "Telur Ayam", "Beras", "Minyak Goreng", "Gula Pasir", "Tepung Terigu", "Tepung Bumbu (Sajiku)",
+            "Kecap Manis (SK/Bango)", "Garam", "Penyedap (Masako/Royco)", "Saori Saus Tiram",
+            "Teh (Daun/Celup)", "Krupuk Mentah", "Bawang Merah", "Bawang Putih", "Cabai (Rawit/Merah)",
+            "Kemiri (Miri)", "Paket Bumbu Dapur (Jahe/Lengkuas)", "Timun", "Kol (Kubis)", "Kemangi",
+            "Kangkung", "Loncang / Seledri", "Jeruk Peras", "Lunch Box Size M", "Plastik (Kresek/Es)",
+            "Kertas Nasi", "Gas LPG 3Kg", "Es Batu (Kristal/Balok)", "Sabun Cuci (Sunlight)",
+            "Pepes Tahu", "Pepes Fillet Gurame", "Jeruk Nipis", "Sop-Sopan/ASem", "Kara",
+            "Bihun/Soon", "Daun Pisang", "Ketumbar", "Tomat", "Galon", "Lunch Box L", "Lunch Box S",
+            "Cup Minum", "Tinwall Kangkung", "Tinwall Soto", "Kertas Minyak", "Plastik 1/4 Kg",
+            "Plastik 1/2 Kg", "Plastik 1 Kg", "Plastik 2 Kg", "Toge", "Karet", "Daging",
+            "Bawang Goreng", "Jahe", "Kunyit"
+        ];
+        
+        const incomeTypes = [
+            "Shopeefood", "Grabfood", "Gofood", "Offline Cash", "Offline QRIS"
+        ];
+
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [activeTab, setActiveTab] = useState('shop');
+            const [itemsDB, setItemsDB] = useState(initialItems);
+            const [cart, setCart] = useState([]);
+            const [history, setHistory] = useState([]);
+            
+            // State Belanja
+            const [editingId, setEditingId] = useState(null);
+            const [itemName, setItemName] = useState('');
+            const [qty, setQty] = useState('');
+            const [unit, setUnit] = useState('Kg');
+            const [totalNominal, setTotalNominal] = useState('');
+            const [transactionDate, setTransactionDate] = useState(new Date().toISOString().split('T')[0]);
+            const [showSuggestions, setShowSuggestions] = useState(false);
+
+            // State Pemasukan (Income)
+            const [incomeDate, setIncomeDate] = useState(new Date().toISOString().split('T')[0]);
+            const [incomeSource, setIncomeSource] = useState('');
+            const [incomeAmount, setIncomeAmount] = useState('');
+            const [showIncomeSuggestions, setShowIncomeSuggestions] = useState(false);
+            
+            const [status, setStatus] = useState({ show: false, message: '', type: 'loading' });
+            const [isSaving, setIsSaving] = useState(false);
+            
+            // State untuk melacak ID arsip yang sedang diedit
+            const [currentNoteId, setCurrentNoteId] = useState(null);
+            
+            // Custom Confirmation Modal State
+            const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', onConfirm: null });
+
+            const commonUnits = ['Kg', 'Pcs', 'Gram', 'Liter', 'Ikat', 'Bungkus', 'Pack', 'Box', 'Butir', 'Biji', 'Lusin'];
+
+            const paths = useMemo(() => {
+                if (!user) return null;
+                return {
+                    history: `artifacts/${appId}/users/${user.uid}/history`,
+                    master: `artifacts/${appId}/users/${user.uid}/master/data`,
+                    cart: `artifacts/${appId}/users/${user.uid}/current/cart`
+                };
+            }, [user]);
+
+            const showStatus = (message, type = 'success') => {
+                setStatus({ show: true, message, type });
+                if (type !== 'loading') {
+                    setTimeout(() => setStatus(prev => ({ ...prev, show: false })), 2000);
+                }
+            };
+
+            useEffect(() => {
+                const login = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await auth.signInWithCustomToken(__initial_auth_token);
+                        } else {
+                            await auth.signInAnonymously();
+                        }
+                    } catch (e) { console.error(e); }
+                };
+                login();
+                return auth.onAuthStateChanged(setUser);
+            }, []);
+
+            useEffect(() => {
+                if (!user || !paths) return;
+
+                const unsubHistory = db.collection(paths.history).onSnapshot(snap => {
+                    const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setHistory(data.sort((a, b) => b.timestamp - a.timestamp));
+                });
+
+                const unsubMaster = db.doc(paths.master).onSnapshot(doc => {
+                    if (doc.exists) setItemsDB(doc.data().items || initialItems);
+                });
+
+                const unsubCart = db.doc(paths.cart).onSnapshot(doc => {
+                    if (doc.exists) setCart(doc.data().items || []);
+                });
+
+                return () => { unsubHistory(); unsubMaster(); unsubCart(); };
+            }, [user, paths]);
+
+            const syncCart = async (newCart) => {
+                if (!user || !paths) return;
+                try { await db.doc(paths.cart).set({ items: newCart }); } catch (e) { console.error(e); }
+            };
+
+            const syncMaster = async (newItems) => {
+                if (!user || !paths) return;
+                try { await db.doc(paths.master).set({ items: newItems }); } catch (e) { console.error(e); }
+            };
+
+            const resetForm = () => {
+                setItemName(''); setQty(''); setTotalNominal(''); setEditingId(null); setShowSuggestions(false);
+            };
+
+            // FIX: Handler tanggal untuk memastikan default ke hari ini jika kosong
+            const handleDateChange = (e, setter) => {
+                const val = e.target.value;
+                if (!val) {
+                    setter(new Date().toISOString().split('T')[0]);
+                } else {
+                    setter(val);
+                }
+            };
+
+            const handleAddItem = async (e) => {
+                e.preventDefault();
+                if (!itemName || !qty) return;
+
+                const quantity = parseFloat(qty);
+                const total = totalNominal ? parseFloat(totalNominal.toString().replace(/\./g, '')) : 0;
+                let newCart = [...cart];
+
+                if (editingId) {
+                    newCart = cart.map(i => i.id === editingId ? { ...i, name: itemName, qty: quantity, unit, total } : i);
+                    setEditingId(null);
+                } else {
+                    newCart = [...cart, { id: Date.now(), name: itemName, qty: quantity, unit, total }];
+                }
+
+                setCart(newCart);
+                await syncCart(newCart);
+
+                if (!itemsDB.some(i => i.toLowerCase() === itemName.trim().toLowerCase())) {
+                    const updatedDB = [...itemsDB, itemName.trim()];
+                    setItemsDB(updatedDB);
+                    await syncMaster(updatedDB);
+                }
+                resetForm();
+            };
+
+            const startEdit = (item) => {
+                setEditingId(item.id);
+                setItemName(item.name);
+                setQty(item.qty);
+                setUnit(item.unit);
+                setTotalNominal(item.total || '');
+                setActiveTab('shop');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+
+            const handleSaveNote = async () => {
+                if (cart.length === 0 || !user || !paths) return;
+                setIsSaving(true);
+                showStatus('Menyimpan Nota...', 'loading');
+                try {
+                    let ref;
+                    let message = '';
+                    
+                    if (currentNoteId) {
+                        ref = db.collection(paths.history).doc(currentNoteId);
+                        message = 'Arsip Diperbarui!';
+                    } else {
+                        ref = db.collection(paths.history).doc();
+                        message = 'Nota Tersimpan!';
+                    }
+                    
+                    await ref.set({
+                        id: ref.id,
+                        date: transactionDate,
+                        items: cart,
+                        total: cart.reduce((acc, curr) => acc + curr.total, 0),
+                        timestamp: Date.now()
+                    });
+                    
+                    setCart([]);
+                    setCurrentNoteId(null);
+                    await syncCart([]);
+                    setIsSaving(false);
+                    showStatus(message);
+                } catch (e) {
+                    setIsSaving(false);
+                    showStatus('Gagal Simpan', 'error');
+                }
+            };
+
+            const triggerClearCart = () => {
+                setConfirmModal({
+                    show: true,
+                    title: 'Reset Rencana?',
+                    message: 'Semua daftar belanjaan akan dihapus dari rencana.',
+                    onConfirm: processClearCart
+                });
+            };
+
+            const processClearCart = async () => {
+                setConfirmModal({ ...confirmModal, show: false });
+                showStatus('Membersihkan...', 'loading');
+                try {
+                    setCart([]);
+                    setCurrentNoteId(null);
+                    if (user && paths) {
+                        await db.doc(paths.cart).set({ items: [] });
+                    }
+                    resetForm();
+                    showStatus('Rencana Direset!');
+                } catch (e) {
+                    showStatus('Gagal Reset', 'error');
+                }
+            };
+
+            const triggerDeleteHistory = (noteId) => {
+                setConfirmModal({
+                    show: true,
+                    title: 'Hapus Arsip?',
+                    message: 'Arsip ini akan dihapus permanen dari Cloud. Anda yakin?',
+                    onConfirm: () => processDeleteHistory(noteId)
+                });
+            };
+
+            const processDeleteHistory = async (noteId) => {
+                setConfirmModal({ ...confirmModal, show: false });
+                if (!user || !paths || !noteId) return;
+                
+                showStatus('Menghapus...', 'loading');
+                try {
+                    await db.collection(paths.history).doc(noteId).delete();
+                    showStatus('Arsip Dihapus!');
+                } catch (e) {
+                    console.error(e);
+                    showStatus('Gagal Menghapus', 'error');
+                }
+            };
+
+            const copyToClipboard = (text) => {
+                const el = document.createElement('textarea');
+                el.value = text;
+                document.body.appendChild(el);
+                el.select();
+                document.execCommand('copy');
+                document.body.removeChild(el);
+                showStatus('Prompt Disalin!');
+            };
+
+            const generatePrompt = () => {
+                const todayFormatted = new Date(transactionDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                const total = cart.reduce((acc, curr) => acc + curr.total, 0);
+                
+                let text = `Fin, catat pengeluaran bahan baku tanggal ${todayFormatted}.\n`;
+                text += `(Mohon pertahankan nominal di dalam kurung)\n\n`;
+                
+                cart.forEach(item => {
+                    text += `${item.name}, ${item.qty} ${item.unit}, (${Math.round(item.total)})\n`;
+                });
+                
+                text += `\nTotal: ${total}`;
+                
+                copyToClipboard(text);
+            };
+
+            // --- INCOME GENERATOR ---
+            const generateIncomePrompt = (e) => {
+                e.preventDefault();
+                if (!incomeSource || !incomeAmount) {
+                    showStatus('Data Belum Lengkap', 'error');
+                    return;
+                }
+                
+                const dateFormatted = new Date(incomeDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                const amountRaw = incomeAmount.toString().replace(/\./g, '');
+                
+                const text = `Fin, ada pemasukan tolong catat ya Payout ${incomeSource} tgl ${dateFormatted} sebesar Rp${amountRaw}`;
+                copyToClipboard(text);
+            };
+
+            const handleIncomeSourceBlur = () => {
+                // Delay agar klik pada item dropdown sempat tereksekusi sebelum dropdown tertutup
+                setTimeout(() => {
+                    setShowIncomeSuggestions(false);
+                }, 200);
+            };
+
+            const formatNumber = (num) => new Intl.NumberFormat('id-ID').format(num);
+
+            return (
+                <div className="max-w-md mx-auto min-h-screen flex flex-col bg-slate-50 relative shadow-2xl overflow-hidden font-sans">
+                    {/* Status Feedback Overlay */}
+                    {status.show && (
+                        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[200] w-max max-w-[90vw]">
+                            <div className={`px-6 py-3 rounded-full shadow-2xl border animate-status flex items-center gap-3 text-sm font-bold backdrop-blur-md ${
+                                status.type === 'loading' ? 'bg-white/90 border-blue-100 text-blue-600' :
+                                status.type === 'error' ? 'bg-red-50/90 border-red-100 text-red-600' :
+                                'bg-green-50/90 border-green-100 text-green-600'
+                            }`}>
+                                {status.type === 'loading' && <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>}
+                                {status.type === 'success' && <div className="w-5 h-5 text-green-600"><Icons.Check /></div>}
+                                {status.type === 'error' && <div className="w-5 h-5 text-red-600"><Icons.Alert /></div>}
+                                {status.message}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Custom Confirmation Modal */}
+                    {confirmModal.show && (
+                        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+                            <div className="bg-white w-full max-w-sm rounded-[2rem] p-6 shadow-2xl modal-enter border border-white/20">
+                                <div className="w-12 h-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4 mx-auto">
+                                    <div className="w-6 h-6"><Icons.Warn /></div>
+                                </div>
+                                <h3 className="text-lg font-black text-center text-slate-800 mb-2">{confirmModal.title}</h3>
+                                <p className="text-sm text-center text-slate-500 mb-6 font-medium">{confirmModal.message}</p>
+                                <div className="flex gap-3">
+                                    <button 
+                                        onClick={() => setConfirmModal({ ...confirmModal, show: false })}
+                                        className="flex-1 py-3 rounded-xl font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors"
+                                    >
+                                        Batal
+                                    </button>
+                                    <button 
+                                        onClick={confirmModal.onConfirm}
+                                        className="flex-1 py-3 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/30 transition-colors"
+                                    >
+                                        Ya, Hapus
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Header */}
+                    <header className="bg-indigo-700 p-6 pt-10 rounded-b-[3.5rem] text-white shadow-xl sticky top-0 z-50">
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <h1 className="text-4xl font-black tracking-tighter italic leading-none">Q-Nota</h1>
+                                <p className="text-[9px] uppercase font-bold opacity-75 flex items-center gap-1.5 mt-2 tracking-[0.2em]">
+                                    <span className={`w-2 h-2 rounded-full ${user ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`}></span>
+                                    {user ? 'Cloud Sync Aktif' : 'Menghubungkan...'}
+                                </p>
+                            </div>
+                            <div className="bg-white/10 p-4 rounded-[1.8rem] backdrop-blur-md border border-white/20 shadow-inner w-14 h-14 text-white">
+                                {activeTab === 'shop' && <Icons.ShopBag />}
+                                {activeTab === 'income' && <Icons.Wallet />}
+                                {activeTab === 'history' && <Icons.Archive />}
+                                {activeTab === 'items' && <Icons.Database />}
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="flex-1 p-5 overflow-y-auto no-scrollbar">
+                        {activeTab === 'shop' && (
+                            <div className="space-y-4 pb-32">
+                                <div className={`p-6 rounded-[2.5rem] shadow-sm border-2 transition-all duration-300 ${editingId ? 'bg-amber-50 border-amber-200' : 'bg-white border-transparent'}`}>
+                                    <div className="flex justify-between items-center mb-5">
+                                        <h2 className="font-extrabold text-slate-800 uppercase text-[10px] tracking-widest">{editingId ? 'Update Item' : 'Input Rencana'}</h2>
+                                        {editingId && <button onClick={resetForm} className="text-amber-600 bg-amber-100 p-2 rounded-full w-8 h-8"><Icons.X /></button>}
+                                    </div>
+                                    <form onSubmit={handleAddItem} className="space-y-4">
+                                        {!editingId && (
+                                            <div>
+                                                <label className="text-[10px] text-gray-400 font-bold uppercase mb-1.5 block px-1 tracking-wider">Tanggal Transaksi</label>
+                                                <input 
+                                                    type="date" 
+                                                    value={transactionDate} 
+                                                    onChange={e => handleDateChange(e, setTransactionDate)} 
+                                                    className="w-full p-4 bg-slate-100 border-0 rounded-2xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-300 transition-all cursor-pointer" 
+                                                />
+                                            </div>
+                                        )}
+                                        <div className="relative">
+                                            <label className="text-[10px] text-gray-400 font-bold uppercase mb-1.5 block px-1 tracking-wider">Bahan Baku</label>
+                                            <input type="text" value={itemName} onChange={e => { setItemName(e.target.value); setShowSuggestions(true); }} onFocus={() => setShowSuggestions(true)} placeholder="Ketik nama bahan..." className="w-full p-4 bg-slate-100 border-0 rounded-2xl font-bold uppercase outline-none focus:ring-2 focus:ring-indigo-300 transition-all" />
+                                            {showSuggestions && itemName && initialItems.filter(i => i.toLowerCase().includes(itemName.toLowerCase())).length > 0 && (
+                                                <div className="absolute z-[100] w-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 max-h-48 overflow-y-auto no-scrollbar">
+                                                    {initialItems.filter(i => i.toLowerCase().includes(itemName.toLowerCase())).slice(0, 10).map((item, idx) => (
+                                                        <div key={idx} onClick={() => { setItemName(item); setShowSuggestions(false); }} className="p-4 border-b last:border-0 hover:bg-indigo-50 font-bold text-xs uppercase text-slate-600 italic cursor-pointer transition-colors">
+                                                            {item}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <div className="w-1/4">
+                                                <label className="text-[10px] text-gray-400 font-bold uppercase mb-1.5 block px-1 text-center">Qty</label>
+                                                <input type="number" inputMode="decimal" value={qty} onChange={e => setQty(e.target.value)} placeholder="0" className="w-full p-4 bg-slate-100 border-0 rounded-2xl font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300" />
+                                            </div>
+                                            <div className="w-1/4 text-center">
+                                                <label className="text-[10px] text-gray-400 font-bold uppercase mb-1.5 block">Unit</label>
+                                                <select value={unit} onChange={e => setUnit(e.target.value)} className="w-full p-4 bg-slate-100 border-0 rounded-2xl font-bold text-indigo-700 outline-none appearance-none text-center focus:ring-2 focus:ring-indigo-300">
+                                                    {commonUnits.map(u => <option key={u} value={u}>{u}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="flex-1">
+                                                <label className="text-[10px] text-gray-400 font-bold uppercase mb-1.5 block text-right px-1">Total Rp</label>
+                                                <input type="number" inputMode="numeric" value={totalNominal} onChange={e => setTotalNominal(e.target.value)} placeholder="0" className="w-full p-4 bg-slate-100 border-0 rounded-2xl font-bold text-right text-indigo-800 outline-none focus:ring-2 focus:ring-indigo-300" />
+                                            </div>
+                                        </div>
+                                        <button type="submit" className={`w-full py-4 rounded-2xl text-white font-extrabold shadow-lg active:scale-95 transition-all mt-2 ${editingId ? 'bg-amber-500 shadow-amber-200' : 'bg-indigo-700 shadow-indigo-200'}`}>
+                                            {editingId ? 'UPDATE ITEM' : 'TAMBAHKAN KE LIST'}
+                                        </button>
+                                    </form>
+                                </div>
+
+                                {cart.length > 0 && (
+                                    <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
+                                        <div className="p-5 bg-slate-50 flex justify-between items-center border-b">
+                                            <div className="flex flex-col">
+                                                <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest italic tracking-tight">Rencana Belanja</span>
+                                                {currentNoteId && <span className="text-[9px] text-green-500 font-bold flex items-center gap-1 animate-pulse">● Mengedit Arsip Lama</span>}
+                                            </div>
+                                            <button 
+                                                onClick={triggerClearCart} 
+                                                className="text-red-500 text-[10px] font-black uppercase bg-red-50 px-4 py-2 rounded-full hover:bg-red-100 transition-colors flex items-center gap-1.5 active:scale-90"
+                                            >
+                                                <div className="w-3.5 h-3.5"><Icons.Trash /></div> RESET
+                                            </button>
+                                        </div>
+                                        <div className="divide-y divide-slate-50 max-h-[40vh] overflow-y-auto no-scrollbar">
+                                            {cart.map(item => (
+                                                <div key={item.id} className="p-5 flex justify-between items-center bg-white active:bg-slate-50 transition-colors">
+                                                    <div className="flex-1 pr-4">
+                                                        <p className="font-black text-[13px] text-slate-800 uppercase tracking-tight leading-tight">{item.name}</p>
+                                                        <p className="text-[10px] text-slate-400 font-bold italic mt-1">{item.qty} {item.unit} {item.total > 0 && `— Rp ${formatNumber(item.total)}`}</p>
+                                                    </div>
+                                                    <div className="flex gap-4">
+                                                        <button onClick={() => startEdit(item)} className="text-indigo-500 p-2 hover:bg-indigo-50 rounded-xl transition-colors active:scale-90 w-9 h-9"><Icons.Edit /></button>
+                                                        <button onClick={async () => {
+                                                            const n = cart.filter(i => i.id !== item.id);
+                                                            setCart(n); await syncCart(n);
+                                                        }} className="text-slate-300 hover:text-red-500 p-2 transition-colors active:scale-90 w-9 h-9"><Icons.Trash /></button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="p-6 bg-slate-900 text-white rounded-b-[2.5rem]">
+                                            <div className="flex justify-between items-center mb-6">
+                                                <span className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Total Belanja</span>
+                                                <span className="text-2xl font-black text-indigo-400">Rp {formatNumber(cart.reduce((a, b) => a + b.total, 0))}</span>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <button onClick={handleSaveNote} disabled={isSaving} className={`py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all border border-white/5 ${isSaving ? 'bg-white/5 text-gray-500' : 'bg-white/10 text-white active:bg-white/20'}`}>
+                                                    {currentNoteId ? 'UPDATE ARSIP' : 'SIMPAN AWAN'}
+                                                </button>
+                                                <button onClick={generatePrompt} className="bg-indigo-600 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest active:bg-indigo-700 shadow-xl shadow-indigo-500/30 transition-all">PROMPT FIN</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {activeTab === 'income' && (
+                            <div className="space-y-4 pb-32">
+                                <div className="p-6 rounded-[2.5rem] bg-white shadow-sm border border-transparent">
+                                    <h2 className="font-extrabold text-slate-800 uppercase text-[10px] tracking-widest mb-5">Input Pemasukan</h2>
+                                    <form onSubmit={generateIncomePrompt} className="space-y-4">
+                                        <div>
+                                            <label className="text-[10px] text-gray-400 font-bold uppercase mb-1.5 block px-1 tracking-wider">Tanggal Pemasukan</label>
+                                            <input 
+                                                type="date" 
+                                                value={incomeDate} 
+                                                onChange={e => handleDateChange(e, setIncomeDate)} 
+                                                className="w-full p-4 bg-slate-100 border-0 rounded-2xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-300 transition-all cursor-pointer" 
+                                            />
+                                        </div>
+                                        <div className="relative">
+                                            <label className="text-[10px] text-gray-400 font-bold uppercase mb-1.5 block px-1 tracking-wider">Jenis Pemasukan</label>
+                                            <input 
+                                                type="text" 
+                                                value={incomeSource} 
+                                                onChange={e => { setIncomeSource(e.target.value); setShowIncomeSuggestions(true); }} 
+                                                onFocus={() => setShowIncomeSuggestions(true)}
+                                                onBlur={handleIncomeSourceBlur}
+                                                placeholder="Contoh: Shopeefood" 
+                                                className="w-full p-4 bg-slate-100 border-0 rounded-2xl font-bold uppercase outline-none focus:ring-2 focus:ring-indigo-300 transition-all" 
+                                            />
+                                            {showIncomeSuggestions && incomeTypes.filter(i => i.toLowerCase().includes(incomeSource.toLowerCase())).length > 0 && (
+                                                <div className="absolute z-[100] w-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
+                                                    {incomeTypes.filter(i => i.toLowerCase().includes(incomeSource.toLowerCase())).map((item, idx) => (
+                                                        <div key={idx} onClick={() => { setIncomeSource(item); setShowIncomeSuggestions(false); }} className="p-4 border-b last:border-0 hover:bg-indigo-50 font-bold text-xs uppercase text-slate-600 italic cursor-pointer transition-colors">
+                                                            {item}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] text-gray-400 font-bold uppercase mb-1.5 block px-1 tracking-wider">Nominal (Rupiah)</label>
+                                            <input 
+                                                type="number" 
+                                                inputMode="numeric"
+                                                value={incomeAmount} 
+                                                onChange={e => setIncomeAmount(e.target.value)} 
+                                                placeholder="0" 
+                                                className="w-full p-4 bg-slate-100 border-0 rounded-2xl font-bold text-right text-indigo-800 outline-none focus:ring-2 focus:ring-indigo-300 transition-all" 
+                                            />
+                                        </div>
+                                        <button type="submit" className="w-full py-4 rounded-2xl text-white font-extrabold shadow-lg bg-green-600 shadow-green-200 active:scale-95 transition-all mt-4">
+                                            BUAT PROMPT FIN
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'history' && (
+                            <div className="space-y-4 pb-32">
+                                <h2 className="font-extrabold text-slate-800 uppercase px-2 tracking-widest text-[11px] text-center mb-2 italic text-slate-400">Arsip Cloud Q-Nota</h2>
+                                {history.length === 0 ? (
+                                    <div className="text-center py-20 bg-white rounded-[2.5rem] border border-dashed border-slate-200 mx-2">
+                                        <div className="w-10 h-10 mx-auto text-slate-200 mb-3"><Icons.Archive /></div>
+                                        <p className="text-slate-300 font-bold uppercase text-[10px] tracking-widest">Belum ada arsip belanja</p>
+                                    </div>
+                                ) : (
+                                    history.map(note => (
+                                        <div key={note.id} className="bg-white p-5 rounded-[2.2rem] border border-slate-100 shadow-sm active:bg-slate-50 transition-colors relative overflow-hidden">
+                                            <div className="flex justify-between items-center mb-5">
+                                                <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-4 py-1.5 rounded-full uppercase tracking-widest font-mono italic">
+                                                    {new Date(note.date).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric'})}
+                                                </span>
+                                                <span className="font-black text-slate-900">Rp {formatNumber(note.total)}</span>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => { 
+                                                    setCart(note.items); 
+                                                    setTransactionDate(note.date); 
+                                                    setCurrentNoteId(note.id); // Set ID untuk mode edit
+                                                    setActiveTab('shop'); 
+                                                    showStatus('Mode Edit Arsip');
+                                                }} className="flex-1 bg-slate-900 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-[0.98] transition-all shadow-md">LIHAT DETAIL</button>
+                                                <button 
+                                                    onClick={() => triggerDeleteHistory(note.id)} 
+                                                    className="w-14 bg-red-50 text-red-500 rounded-2xl flex justify-center items-center active:bg-red-100 transition-colors active:scale-90"
+                                                >
+                                                    <div className="w-5 h-5"><Icons.Trash /></div>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        )}
+
+                        {activeTab === 'items' && (
+                            <div className="pb-32 px-1 text-center">
+                                <h2 className="font-extrabold text-slate-800 uppercase mb-4 px-2 tracking-widest text-[11px]">Database Master Q-Nota</h2>
+                                <div className="bg-white rounded-[2.5rem] border overflow-hidden shadow-sm border-slate-100">
+                                    {itemsDB.sort().map((item, idx) => (
+                                        <div key={idx} className="p-5 border-b last:border-0 flex justify-between items-center bg-white active:bg-slate-50 transition-colors">
+                                            <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-tight pr-4 text-left">{item}</span>
+                                            <button onClick={async () => {
+                                                if(confirm(`Hapus "${item}" dari database master?`)) {
+                                                    const n = itemsDB.filter(i => i !== item);
+                                                    setItemsDB(n); await syncMaster(n);
+                                                }
+                                            }} className="text-slate-200 hover:text-red-400 active:scale-90 transition-all p-2 w-8 h-8"><Icons.Trash /></button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button onClick={async () => { if(confirm('Reset database ke awal?')) { setItemsDB(initialItems); await syncMaster(initialItems); } }} className="w-full mt-8 text-[9px] font-black text-slate-300 uppercase tracking-[0.2em] hover:text-slate-500 transition-colors">Reset Database Master</button>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* Nav Bar */}
+                    <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-[380px] bg-slate-900/95 backdrop-blur-2xl rounded-[2.8rem] flex justify-around p-2.5 z-[150] shadow-2xl border border-white/10">
+                        <button onClick={() => setActiveTab('shop')} className={`flex-1 py-4 rounded-[2.2rem] flex flex-col items-center tab-transition ${activeTab === 'shop' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-500/20 active-tab-glow' : 'text-slate-500 hover:text-slate-300'}`}>
+                            <div className="w-5 h-5"><Icons.Plan /></div>
+                            <span className="text-[8px] font-black uppercase mt-1 tracking-widest">Plan</span>
+                        </button>
+                        <button onClick={() => setActiveTab('income')} className={`flex-1 py-4 rounded-[2.2rem] flex flex-col items-center tab-transition ${activeTab === 'income' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-500/20 active-tab-glow' : 'text-slate-500 hover:text-slate-300'}`}>
+                            <div className="w-5 h-5"><Icons.Wallet /></div>
+                            <span className="text-[8px] font-black uppercase mt-1 tracking-widest">Income</span>
+                        </button>
+                        <button onClick={() => setActiveTab('history')} className={`flex-1 py-4 rounded-[2.2rem] flex flex-col items-center tab-transition ${activeTab === 'history' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-500/20 active-tab-glow' : 'text-slate-500 hover:text-slate-300'}`}>
+                            <div className="w-5 h-5"><Icons.Archive /></div>
+                            <span className="text-[8px] font-black uppercase mt-1 tracking-widest">Arsip</span>
+                        </button>
+                        <button onClick={() => setActiveTab('items')} className={`flex-1 py-4 rounded-[2.2rem] flex flex-col items-center tab-transition ${activeTab === 'items' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-500/20 active-tab-glow' : 'text-slate-500 hover:text-slate-300'}`}>
+                            <div className="w-5 h-5"><Icons.Database /></div>
+                            <span className="text-[8px] font-black uppercase mt-1 tracking-widest">Master</span>
+                        </button>
+                    </nav>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
