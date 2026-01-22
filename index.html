@@ -383,13 +383,15 @@
                 const total = cart.reduce((acc, curr) => acc + curr.total, 0);
                 
                 let text = `Fin, catat pengeluaran bahan baku tanggal ${todayFormatted}.\n`;
-                text += `(Mohon pertahankan nominal di dalam kurung)\n\n`;
+                text += `(Mohon jangan hilangkan nominal di dalam kurung dideskripsi), deskripsinya berikut:\n\n`;
                 
-                cart.forEach(item => {
-                    text += `${item.name}, ${item.qty} ${item.unit}, (${Math.round(item.total)})\n`;
-                });
+                // Format: Item Qty Unit (Harga), Item Qty Unit (Harga)
+                const itemsList = cart.map(item => {
+                    return `${item.name} ${item.qty} ${item.unit} (${Math.round(item.total)})`;
+                }).join(', ');
                 
-                text += `\nTotal: ${total}`;
+                text += itemsList;
+                text += `\n\nTotal: ${total}`;
                 
                 copyToClipboard(text);
             };
